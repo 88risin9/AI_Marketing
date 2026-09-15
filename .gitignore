@@ -1,0 +1,14 @@
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+data/*
+!data/.gitkeep
+backups/*
+!backups/.gitkeep
+output/
+tmp/
+*.log
+.DS_Store

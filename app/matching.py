@@ -156,7 +156,10 @@ def match_products(analysis, products):
     group_warning = duplicates or any('多组' in str(w) or 'multiple' in str(w).lower() for w in analysis.get('warnings',[]))
     candidates=[]
     for p in products:
+        if p.get('archived'):continue
         reasons=[]; conflicts=[]; pending=[]
+        if (p.get('specs') or {}).get('record_type')=='catalog_series':
+            pending.append('当前记录是目录系列，参数可能包含多个可选配置；须确认具体订货型号和配置，不能认定为已匹配的单一产品。')
         if group_warning: pending.append('询盘含多组或相互矛盾的需求；请拆分为单个产品需求后重新分析，不能合并选型。')
         category=stated.get('product','')
         if not category:pending.append('客户尚未明确产品类别。')

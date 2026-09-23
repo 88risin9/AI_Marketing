@@ -9,7 +9,7 @@ from datetime import date
 from urllib.parse import urlsplit
 from flask import Flask, request, jsonify, send_file, render_template, abort
 from werkzeug.exceptions import HTTPException
-from .db import Store, now, KINDS
+from .db import Store, now, KINDS, V1_KINDS, normalize_bundle
 from .backup_validation import validate_bundle
 from .quotes import create_snapshot, approval_errors, customer_view, review_fingerprint, decimal
 from .pdf_export import pdf_bytes, html_preview
@@ -58,6 +58,8 @@ def create_app(data_dir=None):
             except (ValueError,TypeError):raise ValueError('日期应为 YYYY-MM-DD。')
     @app.before_request
     def protect_local():
+        if request.path=='/api/restore':
+            request.max_content_length=64*1024*1024
         hostname=request.host.split(':')[0]
         if hostname not in ('localhost','127.0.0.1','[::1]'):abort(403)
         if request.method not in ('GET','HEAD','OPTIONS'):
@@ -76,17 +78,17 @@ def create_app(data_dir=None):
     @app.errorhandler(Exception)
     def error(exc):
         if isinstance(exc,ValueError):return jsonify(error=str(exc)),400
-        if isinstance(exc,HTTPException):return jsonify(error={413:'文件超过 8 MB 限制。',403:'请求来源不受信任，请从本机工作台重试。',404:'页面或记录不存在。'}.get(exc.code,'请求无法处理。')),exc.code
+        if isinstance(exc,HTTPException):return jsonify(error={413:'备份超过 64 MB 限制。' if request.path=='/api/restore' else '文件超过 8 MB 限制。',403:'请求来源不受信任，请从本机工作台重试。',404:'页面或记录不存在。'}.get(exc.code,'请求无法处理。')),exc.code
         # Never emit request bodies, provider responses, configuration, or credentials to logs.
         return jsonify(error='处理失败，原始资料已保留。请重试；若仍失败，请检查本地配置。'),500
     @app.get('/')
     def index():return render_template('index.html')
     @app.get('/api/health')
-    def health():return jsonify(ok=True)
+    def health():return jsonify(ok=True,version=2,role='internal')
     @app.get('/api/state')
     def state():
-        s=store();bundle=s.export(workspace())
-        result=dict(bundle['records']);result.update(workspace=workspace(),company=s.setting('company',{'name':'','email':'','address':''}),ai=ai.get_config(),today=date.today().isoformat())
+        s=store()
+        result={kind:list(reversed(s.all(kind))) for kind in V1_KINDS};result.update(workspace=workspace(),company=s.setting('company',{'name':'','email':'','address':''}),ai=ai.get_config(),today=date.today().isoformat())
         return jsonify(result)
     @app.post('/api/company')
     def company():return jsonify(store().set_setting('company',str_fields(payload(),['name','email','address'])))
@@ -114,13 +116,26 @@ def create_app(data_dir=None):
         return jsonify(product_module.parse_import(f.filename,f.read()))
     @app.post('/api/import/commit')
     def commit_import():
-        rows=payload().get('rows')
+        data=payload();rows=data.get('rows');replace_demo=data.get('replace_demo',False)
+        if type(replace_demo) is not bool:raise ValueError('替换示例产品标记必须为布尔值。')
+        if replace_demo and workspace()!='demo':raise ValueError('替换示例产品仅允许在示例测试空间使用。')
         if not isinstance(rows,list) or not rows or len(rows)>5000:raise ValueError('请提供 1 至 5000 行产品资料。')
         validated=[product_module.validate_product(p) for p in rows]
         for p in validated:p['source_updated_at']=p.get('updated_at','')
         s=store()
-        with s.connect() as c:saved=[s.save_in(c,'products',p) for p in validated]
-        return jsonify(count=len(saved),products=saved)
+        archived_count=0;backup_file=None
+        with WRITE_LOCK,s.connect() as c:
+            if replace_demo:
+                backup_file=s.backup_in(c,workspace(),folder.parent/'backups','before-product-replacement')
+                existing=[json.loads(row[0]) for row in c.execute('SELECT data FROM records WHERE kind=?',('products',))]
+                for old in existing:
+                    # Only explicit fictional seed products qualify; real imports remain untouched.
+                    if (not old.get('archived') and old.get('model','').startswith('DEMO-') and
+                            ('虚构' in old.get('supplier','') or '虚构' in old.get('source',''))):
+                        old.update(archived=True,archived_at=now())
+                        s.save_in(c,'products',old,old['id']);archived_count+=1
+            saved=[s.save_in(c,'products',p) for p in validated]
+        return jsonify(count=len(saved),products=saved,archived_count=archived_count,backup_file=backup_file)
     @app.get('/api/templates/<name>')
     def templates_download(name):
         if name not in ('products.csv','products.xlsx','example.csv','example.xlsx'):abort(404)
@@ -263,7 +278,21 @@ def create_app(data_dir=None):
         if not f:raise ValueError('请选择备份 JSON 文件。')
         try:bundle=json.loads(f.read())
         except (ValueError,UnicodeError):raise ValueError('备份不是有效的 UTF-8 JSON 文件。')
+        bundle=normalize_bundle(bundle)
         validate_bundle(bundle)
-        with WRITE_LOCK:name=store().restore(bundle,workspace(),folder.parent/'backups')
+        with WRITE_LOCK,research_manager.lock:
+            if research_manager.has_running(workspace()):
+                raise ValueError('研究任务仍在执行。请取消任务并等待当前调用结束后再恢复，避免覆盖新取得的结果。')
+            other=stores['demo' if workspace()=='live' else 'live']
+            other_tokens={p.get('token') for p in other.all('buyer_pages')}
+            if any(p.get('token') in other_tokens for p in bundle['records']['buyer_pages']):
+                raise ValueError('买家页面链接与另一资料空间冲突，恢复已取消。')
+            name=store().restore(bundle,workspace(),folder.parent/'backups')
+            research_manager.recover(workspace())
         return jsonify(ok=True,backup_file=name,message='恢复完成。恢复前的数据已自动备份。')
+    from .research import register_research
+    from .portal import register_portal_management
+    research_manager=register_research(app,stores,workspace)
+    app.extensions['research_manager']=research_manager
+    register_portal_management(app,stores,workspace)
     return app

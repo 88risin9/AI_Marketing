@@ -39,6 +39,8 @@ ALIASES.update({
     "单位": "unit", "币种": "currency", "规格参数": "specs", "更新时间": "updated_at",
     "MOQ": "moq", "moq": "moq", "额定电流": "specs.current_a",
     "额定电压": "specs.voltage_v", "分断能力": "specs.breaking_ka",
+    "产品大类": "specs.product_family", "资料类型": "specs.record_type",
+    "目录摘要": "specs.source_specification", "待确认事项": "specs.review_notes",
     **{key: "specs." + key for key in ("poles", "current_a", "voltage_v", "curve", "breaking_ka")},
 })
 
@@ -113,7 +115,6 @@ def validate_product(payload):
         if field in {"model", "unit"} and payload.get(field) is not None and not isinstance(payload[field], str):
             raise ValueError(f"{LABELS[field]}必须为文本，以保留前导零和原始写法")
         product[field] = _text(payload.get(field), LABELS.get(field, field), field in {"model", "unit"})
-    product["category"] = product["category"] or "MCB"
     product["purchase_price"] = _decimal(payload.get("purchase_price"), "采购价")
     product["moq"] = _decimal(payload.get("moq"), "最小起订量", positive=True)
     product["currency"] = _text(payload.get("currency"), "采购币种").upper()
@@ -135,12 +136,24 @@ def validate_product(payload):
             raise ValueError("规格参数名称须为 1 至 100 个字符")
         normalized = _text(value, f"参数 {key}")
         product["specs"][key] = normalized
-    missing = [LABELS[key] for key in ("supplier", "name", "name_en", "model", "unit", "purchase_price", "currency", "moq", "lead_time", "source", "updated_at") if not product[key].strip()]
+    missing = [LABELS[key] for key in ("supplier", "name", "name_en", "model", "category", "unit", "purchase_price", "currency", "moq", "lead_time", "source", "updated_at") if not product[key].strip()]
     if product["category"].upper() == "MCB":
         for key in ("poles", "current_a", "voltage_v", "curve", "breaking_ka"):
             if not product["specs"].get(key, "").strip():
                 missing.append(LABELS["specs." + key])
     product["missing"] = missing
+    if "archived" in payload:
+        if type(payload["archived"]) is not bool:
+            raise ValueError("产品归档标记必须为布尔值")
+        product["archived"] = payload["archived"]
+    if "archived_at" in payload:
+        archived_at = _text(payload["archived_at"], "产品归档时间")
+        if archived_at:
+            try:
+                datetime.fromisoformat(archived_at)
+            except ValueError as exc:
+                raise ValueError("产品归档时间格式不正确") from exc
+        product["archived_at"] = archived_at
     return product
 
 
@@ -258,6 +271,7 @@ def parse_import(filename, content):
         return {**empty, "errors": header_errors, "warnings": notes}
     rows = []
     identities = set()
+    model_identities = set()
     for row_number, values in enumerate(data[1:], start=2):
         if all(value in (None, "") for value, _ in values):
             continue
@@ -300,10 +314,14 @@ def parse_import(filename, content):
                 warnings.append("资料待补：" + "、".join(product["missing"]))
         except ValueError as exc:
             row_errors.append(str(exc))
-        identity = (str(product.get("supplier", "")), str(product.get("model", "")))
-        if identity[1].strip() and identity in identities:
-            warnings.append("文件中出现相同供应商和型号，确认是否为重复记录")
+        model_identity = (str(product.get("supplier", "")), str(product.get("model", "")))
+        identity = model_identity + (json.dumps(product.get("specs", {}), ensure_ascii=False, sort_keys=True), str(product.get("unit", "")))
+        if model_identity[1].strip() and identity in identities:
+            warnings.append("文件中出现相同供应商、型号、规格和单位，确认是否为重复记录")
+        elif model_identity[1].strip() and model_identity in model_identities:
+            warnings.append("同型号存在不同规格或单位，作为独立变体保留，请逐行核对")
         identities.add(identity)
+        model_identities.add(model_identity)
         rows.append({"row": row_number, "product": product, "errors": list(dict.fromkeys(row_errors)), "warnings": warnings})
     return {"rows": rows, "errors": [], "warnings": notes}
 

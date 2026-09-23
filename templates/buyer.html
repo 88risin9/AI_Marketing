@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{{ title }} — Procurement enquiry</title>
+  <link rel="stylesheet" href="/assets/buyer.css">
+  <script src="/assets/buyer.js" defer></script>
+</head>
+<body>
+  <div class="preview-banner">LOCAL PREVIEW · 本地预览，尚未公开部署，海外买家目前无法访问此链接</div>
+  <main>
+    <header class="hero">
+      <div class="eyebrow"><span class="brand-mark">↗</span> PRODUCT ENQUIRY</div>
+      <p id="demo-notice" class="demo-notice" hidden>FICTIONAL DEMO — These products and this page are for testing only. They are not real offers.</p>
+      <h1 id="page-title">{{ title }}</h1>
+      <p id="page-intro" class="intro">Loading approved product information…</p>
+      <div class="hero-meta"><span>No registration required</span><span>Requirements reviewed before quotation</span></div>
+    </header>
+    <div id="load-error" class="notice error" role="alert" hidden></div>
+    <section id="catalog" aria-labelledby="catalog-heading" hidden>
+      <div class="section-heading"><div><p class="eyebrow">REFERENCE PRODUCTS</p><h2 id="catalog-heading">Start with a model or your own list</h2></div><span class="hint">Unspecified details remain to be confirmed.</span></div>
+      <div id="products" class="product-grid"></div>
+    </section>
+    <section id="request-section" class="request-section" aria-labelledby="request-heading" hidden>
+      <aside>
+        <p class="eyebrow">YOUR REQUIREMENTS</p>
+        <h2 id="request-heading">Tell us what you need</h2>
+        <p>A model number, a brief description, or a purchase list is enough to start.</p>
+        <ol class="steps"><li>Share the products you need</li><li>Add your contact details</li><li>We review the details before responding</li></ol>
+        <div class="privacy-note"><strong>Your enquiry stays private.</strong><p>Your contact details and uploaded list are stored for the seller to review this request. They are not displayed on this page. No payment is requested here.</p></div>
+      </aside>
+      <form id="inquiry-form" novalidate>
+        <div class="field-grid">
+          <label class="full">Model or product name <span class="optional">optional if you describe or upload your requirements</span><input name="model" maxlength="200" list="model-options" placeholder="Enter a model or product name"><datalist id="model-options"></datalist></label>
+          <label>Quantity <span class="optional">if known</span><input name="quantity" maxlength="80" inputmode="decimal" placeholder="e.g. 1,000"></label>
+          <label>Unit <span class="optional">if known</span><input name="unit" maxlength="80" placeholder="e.g. pcs, sets"></label>
+          <label class="full">Requirements <span class="optional">include any essential specifications</span><textarea name="requirements" maxlength="6000" rows="4" placeholder="Please include voltage, current, poles or other essential requirements. Unknown details can be left open."></textarea></label>
+          <label class="full">Purchase list <span class="optional">optional</span><input name="file" type="file" accept=".csv,.xlsx,.txt"><span class="hint">CSV, XLSX or TXT · up to 1 MB, 200 rows and 30 columns. Use one worksheet with values, without formulas.</span></label>
+          <label class="full">When do you need delivery? <span class="optional">if known</span><input name="timing" maxlength="300" placeholder="A target date or timeframe; subject to confirmation"></label>
+        </div>
+        <div class="form-divider"><span>Your contact details</span></div>
+        <div class="field-grid">
+          <label>Contact name <span class="optional">name or company required</span><input name="name" maxlength="150" autocomplete="name"></label>
+          <label>Company <span class="optional">name or company required</span><input name="company" maxlength="200" autocomplete="organization"></label>
+          <label>Email <span class="required">required</span><input name="email" type="email" maxlength="254" autocomplete="email" required></label>
+          <label>Country or region <span class="optional">optional</span><input name="country" maxlength="100" autocomplete="country-name"></label>
+        </div>
+        <label class="bot-field" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <label class="consent"><input type="checkbox" name="consent" value="yes" required><span>I agree that these details may be used to review and respond to this request.</span></label>
+        <div id="form-error" class="notice error" role="alert" hidden></div>
+        <button id="submit-button" type="submit">Submit enquiry <span aria-hidden="true">↗</span></button>
+        <p class="hint below-submit">Submitting a request does not confirm an order, price, certification, availability or delivery commitment.</p>
+      </form>
+      <div id="receipt" class="receipt" role="status" hidden><span class="receipt-icon">✓</span><h3>Request received</h3><p id="receipt-message"></p><p class="hint">You can close this page. Your private request is available only in the seller’s internal workbench.</p></div>
+    </section>
+    <footer>Procurement enquiry · Product details and commercial terms are subject to individual confirmation.</footer>
+  </main>
+</body>
+</html>

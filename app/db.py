@@ -1,11 +1,26 @@
 """Small SQLite store. JSON payloads support new product parameters without migrations."""
 import json
+import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime
 from contextlib import contextmanager
 
-KINDS = ('products','customers','inquiries','quotes','activities')
+V1_KINDS = ('products','customers','inquiries','quotes','activities')
+V2_KINDS = ('research_tasks','prospects','materials','buyer_pages')
+KINDS = V1_KINDS + V2_KINDS
+
+def normalize_bundle(bundle):
+    """Accept V1 backups without silently omitting V2 data from new backups."""
+    if not isinstance(bundle,dict) or bundle.get('format')!='trade-workbench' or bundle.get('schema_version') not in (1,2):
+        raise ValueError('不是此应用支持的备份文件。')
+    records=bundle.get('records')
+    expected=V1_KINDS if bundle['schema_version']==1 else KINDS
+    if not isinstance(records,dict) or set(records)!=set(expected):
+        raise ValueError('备份数据表不完整。')
+    if any(not isinstance(v,list) for v in records.values()):
+        raise ValueError('备份数据格式不正确。')
+    return {**bundle,'schema_version':2,'records':{**records,**{k:[] for k in V2_KINDS if k not in records}}}
 def now():
     return datetime.now().astimezone().isoformat(timespec='microseconds')
 
@@ -60,14 +75,23 @@ class Store:
         return data
     def export(self,workspace):
         with self.connect() as c:
-            entities={kind:[] for kind in KINDS}
-            for kind,data in c.execute('SELECT kind,data FROM records ORDER BY id'):
-                entities[kind].append(json.loads(data))
-            settings={k:json.loads(d) for k,d in c.execute('SELECT key,data FROM settings')}
-        return {'format':'trade-workbench','schema_version':1,'workspace':workspace,'exported_at':now(),'records':entities,'settings':settings}
+            return self.export_in(c,workspace)
+    def export_in(self,c,workspace):
+        entities={kind:[] for kind in KINDS}
+        for kind,data in c.execute('SELECT kind,data FROM records ORDER BY id'):
+            entities[kind].append(json.loads(data))
+        settings={k:json.loads(d) for k,d in c.execute('SELECT key,data FROM settings')}
+        return {'format':'trade-workbench','schema_version':2,'workspace':workspace,'exported_at':now(),'records':entities,'settings':settings}
+    def backup_in(self,c,workspace,backup_dir,reason):
+        """Write a complete private backup while the caller holds the DB transaction."""
+        backup_dir=Path(backup_dir);backup_dir.mkdir(parents=True,exist_ok=True)
+        path=backup_dir/f'{workspace}-{reason}-{datetime.now().strftime("%Y%m%d-%H%M%S-%f")}.json'
+        descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(descriptor,'w',encoding='utf-8') as handle:
+            json.dump(self.export_in(c,workspace),handle,ensure_ascii=False,indent=2,allow_nan=False)
+        return path.name
     def restore(self,bundle,workspace,backup_dir):
-        if not isinstance(bundle,dict) or bundle.get('format')!='trade-workbench' or bundle.get('schema_version')!=1:
-            raise ValueError('不是此应用支持的备份文件。')
+        bundle=normalize_bundle(bundle)
         if bundle.get('workspace')!=workspace: raise ValueError('备份所属资料空间不一致，请先切换正式/示例空间。')
         records=bundle.get('records')
         if not isinstance(records,dict) or set(records)!=set(KINDS): raise ValueError('备份数据表不完整。')
@@ -90,7 +114,7 @@ class Store:
         with self.connect() as c:
             old={kind:[] for kind in KINDS}
             for kind,data in c.execute('SELECT kind,data FROM records'):old[kind].append(json.loads(data))
-            previous={'format':'trade-workbench','schema_version':1,'workspace':workspace,'exported_at':now(),'records':old,'settings':{k:json.loads(d) for k,d in c.execute('SELECT key,data FROM settings')}}
+            previous={'format':'trade-workbench','schema_version':2,'workspace':workspace,'exported_at':now(),'records':old,'settings':{k:json.loads(d) for k,d in c.execute('SELECT key,data FROM settings')}}
             path.write_text(json.dumps(previous,ensure_ascii=False,indent=2),encoding='utf-8');path.chmod(0o600)
             c.execute('DELETE FROM records');c.execute('DELETE FROM settings')
             for kind,rows in records.items():

@@ -48,7 +48,7 @@ def changed_xlsx_cell(content, address, kind, value):
 
 class ProductValidationTests(unittest.TestCase):
     def test_missing_is_visible_without_fabrication(self):
-        p = validate_product({"name": "MCB", "specs": {"current_a": "16"}})
+        p = validate_product({"name": "MCB", "category": "MCB", "specs": {"current_a": "16"}})
         self.assertEqual(p["purchase_price"], "")
         self.assertEqual(p["currency"], "")
         self.assertEqual(p["lead_time"], "")

@@ -43,6 +43,7 @@ def create_snapshot(payload,inquiry,products,customer,company):
         if not isinstance(row,dict):raise ValueError(f'第 {n} 行报价格式不正确。')
         try:p=products[int(row.get('product_id',0))]
         except (KeyError,ValueError,TypeError):raise ValueError(f'第 {n} 行产品不存在。')
+        if p.get('archived'):raise ValueError(f'第 {n} 行产品已归档，请重新选型后创建报价；历史报价不受影响。')
         item={k:p.get(k,'') for k in ['model','specs','purchase_price','unit']}
         item.update(product_id=p['id'],description=str(row.get('description') or p.get('name_en') or '').strip(),cost_currency=p.get('currency',''),source=p.get('source',''),product_updated_at=p.get('updated_at',''))
         item['unit']=str(row.get('unit',p.get('unit','')))

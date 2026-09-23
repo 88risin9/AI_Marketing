@@ -3,9 +3,11 @@ from datetime import date
 from .products import validate_product
 from .quotes import decimal,CURRENCIES,money,exact_math
 from decimal import Decimal, ROUND_HALF_UP
+from .db import normalize_bundle
 
 @exact_math
 def validate_bundle(bundle):
+    bundle=normalize_bundle(bundle)
     if not isinstance(bundle,dict):raise ValueError('备份内容无效。')
     rows=bundle.get('records')
     if not isinstance(rows,dict):raise ValueError('备份缺少记录。')
@@ -76,3 +78,22 @@ def validate_bundle(bundle):
         require(a,['id','kind','created_at']);text(a,['kind','message','created_at'])
     company=bundle.get('settings',{}).get('company')
     if company is not None:require(company,['name']);text(company,['name','email','address'])
+    from .research import validate_research_backup
+    from .portal import validate_page_backup
+    validate_research_backup(rows)
+    tokens=[]
+    products={p['id'] for p in rows['products']}
+    prospects={p['id'] for p in rows['prospects']}
+    for page in rows['buyer_pages']:
+        validate_page_backup(page)
+        snapshots=[page['draft_snapshot']]+[v['snapshot'] for v in page['versions']]
+        if page.get('public_snapshot') is not None:snapshots.append(page['public_snapshot'])
+        if any(s['demo'] != (bundle.get('workspace')=='demo') for s in snapshots):
+            raise ValueError('备份采购页面的示例标记与资料空间不一致。')
+        tokens.append(page['token'])
+        if any(pid not in products for pid in page['product_ids']):
+            raise ValueError('备份采购页面的产品关联无效。')
+        if page.get('prospect_id') is not None and page['prospect_id'] not in prospects:
+            raise ValueError('备份采购页面的企业关联无效。')
+    if len(tokens)!=len(set(tokens)):
+        raise ValueError('备份中的买家页面链接重复。')
